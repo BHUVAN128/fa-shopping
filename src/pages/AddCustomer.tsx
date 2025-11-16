@@ -7,7 +7,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { toast } from "sonner";
 import { Plus, Trash2, ShoppingCart } from "lucide-react";
 
@@ -16,6 +22,7 @@ interface Product {
   name: string;
   price: number;
   qty: number;
+  is_deleted: boolean; // IMPORTANT
 }
 
 interface SaleItem {
@@ -30,15 +37,27 @@ const AddCustomer = () => {
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
   const [extraDetails, setExtraDetails] = useState("");
-  const [saleItems, setSaleItems] = useState<SaleItem[]>([{ productId: "", qty: 1, price: 0 }]);
+  const [saleItems, setSaleItems] = useState<SaleItem[]>([
+    { productId: "", qty: 1, price: 0 },
+  ]);
   const [loading, setLoading] = useState(false);
 
+  // ✅ Fetch only non-deleted products
   useEffect(() => {
     fetchProducts();
   }, []);
 
   const fetchProducts = async () => {
-    const { data } = await supabase.from("products").select("*");
+    const { data, error } = await supabase
+      .from("products")
+      .select("*")
+      .eq("is_deleted", false); // ⬅️ hide deleted products
+
+    if (error) {
+      console.error("Fetch products error", error);
+      return;
+    }
+
     setProducts(data || []);
   };
 
@@ -52,12 +71,18 @@ const AddCustomer = () => {
 
   const updateSaleItem = (index: number, field: string, value: any) => {
     const updated = [...saleItems];
+
     if (field === "productId") {
       const product = products.find((p) => p.id === value);
-      updated[index] = { ...updated[index], productId: value, price: product?.price || 0 };
+      updated[index] = {
+        ...updated[index],
+        productId: value,
+        price: product?.price || 0,
+      };
     } else {
       updated[index] = { ...updated[index], [field]: value };
     }
+
     setSaleItems(updated);
   };
 
@@ -72,40 +97,31 @@ const AddCustomer = () => {
     try {
       if (!phone.trim()) throw new Error("Phone number is required");
       if (!name.trim()) throw new Error("Customer name is required");
-      if (saleItems.length === 0) throw new Error("At least one product is required");
 
       for (const item of saleItems) {
-        if (!item.productId) {
-          throw new Error("Please select all products");
-        }
-        if (item.qty <= 0) {
-          throw new Error("Quantity must be greater than 0");
-        }
+        if (!item.productId) throw new Error("Please select all products");
+
+        if (item.qty <= 0) throw new Error("Quantity must be greater than 0");
+
         const product = products.find((p) => p.id === item.productId);
-        if (!product || product.qty < item.qty) {
+        if (!product || product.qty < item.qty)
           throw new Error(`Not enough stock for ${product?.name}`);
-        }
       }
 
+      // Check if customer exists
       const { data: existingCustomer, error: custError } = await supabase
         .from("customers")
         .select("*")
         .eq("phone", phone.trim())
         .single();
 
-      if (custError && custError.code !== 'PGRST116') {
-        console.warn("Customer fetch warning:", custError);
-      }
-
       if (!existingCustomer) {
-        const { error: insertError } = await supabase
+        await supabase
           .from("customers")
           .insert({ phone: phone.trim(), name: name.trim() });
-        if (insertError) {
-          console.warn("Customer insert warning:", insertError);
-        }
       }
 
+      // Insert sale
       const total = calculateTotal();
       const { data: sale, error: saleError } = await supabase
         .from("sales")
@@ -118,42 +134,37 @@ const AddCustomer = () => {
         .select()
         .single();
 
-      if (saleError) throw new Error(`Sale insert failed: ${saleError.message}`);
-      if (!sale) throw new Error("No sale data returned");
+      if (saleError) throw new Error("Sale insert failed");
 
+      // Insert sale items + update stock + log stock
       for (const item of saleItems) {
-        const { error: itemError } = await supabase.from("sale_items").insert({
+        await supabase.from("sale_items").insert({
           sale_id: sale.id,
           product_id: item.productId,
           qty: item.qty,
           price: item.price,
         });
-        if (itemError) throw new Error(`Sale item insert failed: ${itemError.message}`);
 
         const product = products.find((p) => p.id === item.productId);
         if (product) {
-          const { error: updateError } = await supabase
+          await supabase
             .from("products")
             .update({ qty: product.qty - item.qty })
             .eq("id", item.productId);
-          if (updateError) throw new Error(`Product update failed: ${updateError.message}`);
-        }
-      }
 
-      for (const item of saleItems) {
-        const { error: logError } = await supabase.from("stock_logs").insert({
-          product_id: item.productId,
-          type: "sale",
-          change: -Math.abs(item.qty),
-          note: `Sold in sale ${sale.id}`,
-        });
-        if (logError) console.warn("Stock log warning:", logError);
+          // log stock movement
+          await supabase.from("stock_logs").insert({
+            product_id: item.productId,
+            type: "sale",
+            change: -item.qty,
+            note: `Sold in sale ${sale.id}`,
+          });
+        }
       }
 
       toast.success("Purchase recorded successfully!");
       navigate("/dashboard");
     } catch (error: any) {
-      console.error("AddCustomer error:", error);
       toast.error(error.message || "Failed to record purchase");
     } finally {
       setLoading(false);
@@ -172,44 +183,42 @@ const AddCustomer = () => {
 
         <Card className="p-6 backdrop-blur-xl bg-white/50 border-white/20 shadow-glass">
           <form onSubmit={handleSubmit} className="space-y-6">
+            {/* Customer Info */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <Label htmlFor="phone">Customer Phone</Label>
+                <Label>Customer Phone</Label>
                 <Input
-                  id="phone"
-                  type="tel"
                   value={phone}
                   onChange={(e) => setPhone(e.target.value)}
                   placeholder="Enter phone number"
-                  required
                 />
               </div>
+
               <div>
-                <Label htmlFor="name">Customer Name</Label>
+                <Label>Customer Name</Label>
                 <Input
-                  id="name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="Enter name"
-                  required
                 />
               </div>
             </div>
 
+            {/* Products */}
             <div className="space-y-4">
-              <div className="flex items-center justify-between">
+              <div className="flex justify-between items-center">
                 <Label className="text-lg">Products</Label>
-                <Button type="button" onClick={addMoreProducts} variant="outline" size="sm">
-                  <Plus className="w-4 h-4 mr-2" />
-                  Add More
+                <Button type="button" variant="outline" size="sm" onClick={addMoreProducts}>
+                  <Plus className="w-4 h-4 mr-2" /> Add More
                 </Button>
               </div>
 
               {saleItems.map((item, index) => (
                 <div key={index} className="p-4 bg-muted/50 rounded-lg space-y-3">
-                  <div className="flex items-start gap-3">
+                  <div className="flex gap-3">
                     <div className="flex-1">
                       <Label>Product</Label>
+
                       <Select
                         value={item.productId}
                         onValueChange={(value) => updateSaleItem(index, "productId", value)}
@@ -217,27 +226,33 @@ const AddCustomer = () => {
                         <SelectTrigger>
                           <SelectValue placeholder="Select product" />
                         </SelectTrigger>
+
                         <SelectContent>
                           {products
-                           .filter((product) => Number(product.qty) > 0)   // HIDE ZERO STOCK
-                           .map((product) => (
-
-                            <SelectItem key={product.id} value={product.id}>
-                              {product.name} - ₹{product.price} (Stock: {product.qty})
-                            </SelectItem>
-                          ))}
+                            .filter(
+                              (product) => product.qty > 0 && product.is_deleted === false
+                            )
+                            .map((product) => (
+                              <SelectItem key={product.id} value={product.id}>
+                                {product.name} - ₹{product.price} (Stock: {product.qty})
+                              </SelectItem>
+                            ))}
                         </SelectContent>
                       </Select>
                     </div>
+
                     <div className="w-32">
                       <Label>Quantity</Label>
                       <Input
                         type="number"
                         min="1"
                         value={item.qty}
-                        onChange={(e) => updateSaleItem(index, "qty", parseInt(e.target.value))}
+                        onChange={(e) =>
+                          updateSaleItem(index, "qty", parseInt(e.target.value))
+                        }
                       />
                     </div>
+
                     {saleItems.length > 1 && (
                       <Button
                         type="button"
@@ -250,41 +265,34 @@ const AddCustomer = () => {
                       </Button>
                     )}
                   </div>
-                  <div className="text-sm text-muted-foreground">
-                    Subtotal: ₹{(item.price * item.qty).toFixed(2)}
-                  </div>
                 </div>
               ))}
             </div>
 
+            {/* Extra Details */}
             <div>
-              <Label htmlFor="details">Extra Details</Label>
+              <Label>Extra Details</Label>
               <Textarea
-                id="details"
                 value={extraDetails}
                 onChange={(e) => setExtraDetails(e.target.value)}
-                placeholder="Add any additional notes..."
-                rows={3}
+                placeholder="Add any notes..."
               />
             </div>
 
-            <div className="p-4 bg-gradient-primary rounded-lg">
-              <div className="flex justify-between items-center text-white">
-                <span className="text-xl font-bold">Total:</span>
-                <span className="text-3xl font-bold">₹{calculateTotal().toFixed(2)}</span>
-              </div>
+            {/* Total */}
+            <div className="p-4 bg-gradient-primary rounded-lg text-white flex justify-between">
+              <span className="text-xl font-bold">Total:</span>
+              <span className="text-3xl font-bold">₹{calculateTotal().toFixed(2)}</span>
             </div>
 
+            {/* Buttons */}
             <div className="flex gap-3">
               <Button type="submit" className="flex-1 bg-gradient-primary" disabled={loading}>
                 <ShoppingCart className="w-4 h-4 mr-2" />
                 {loading ? "Processing..." : "Complete Purchase"}
               </Button>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={() => navigate("/dashboard")}
-              >
+
+              <Button variant="outline" onClick={() => navigate("/dashboard")}>
                 Cancel
               </Button>
             </div>
