@@ -22,7 +22,7 @@ interface Product {
   name: string;
   price: number;
   qty: number;
-  is_deleted: boolean; // IMPORTANT
+  category: string;
 }
 
 interface SaleItem {
@@ -42,7 +42,7 @@ const AddCustomer = () => {
   ]);
   const [loading, setLoading] = useState(false);
 
-  // ✅ Fetch only non-deleted products
+  // Fetch products
   useEffect(() => {
     fetchProducts();
   }, []);
@@ -51,7 +51,7 @@ const AddCustomer = () => {
     const { data, error } = await supabase
       .from("products")
       .select("*")
-      .eq("is_deleted", false); // ⬅️ hide deleted products
+      .neq("category", "__archived__"); // <-- CORRECT FILTER
 
     if (error) {
       console.error("Fetch products error", error);
@@ -74,6 +74,7 @@ const AddCustomer = () => {
 
     if (field === "productId") {
       const product = products.find((p) => p.id === value);
+
       updated[index] = {
         ...updated[index],
         productId: value,
@@ -100,7 +101,6 @@ const AddCustomer = () => {
 
       for (const item of saleItems) {
         if (!item.productId) throw new Error("Please select all products");
-
         if (item.qty <= 0) throw new Error("Quantity must be greater than 0");
 
         const product = products.find((p) => p.id === item.productId);
@@ -109,16 +109,17 @@ const AddCustomer = () => {
       }
 
       // Check if customer exists
-      const { data: existingCustomer, error: custError } = await supabase
+      const { data: existingCustomer } = await supabase
         .from("customers")
         .select("*")
         .eq("phone", phone.trim())
-        .single();
+        .maybeSingle();
 
       if (!existingCustomer) {
-        await supabase
-          .from("customers")
-          .insert({ phone: phone.trim(), name: name.trim() });
+        await supabase.from("customers").insert({
+          phone: phone.trim(),
+          name: name.trim(),
+        });
       }
 
       // Insert sale
@@ -134,9 +135,9 @@ const AddCustomer = () => {
         .select()
         .single();
 
-      if (saleError) throw new Error("Sale insert failed");
+      if (saleError) throw saleError;
 
-      // Insert sale items + update stock + log stock
+      // Insert sale items & update stock
       for (const item of saleItems) {
         await supabase.from("sale_items").insert({
           sale_id: sale.id,
@@ -152,7 +153,6 @@ const AddCustomer = () => {
             .update({ qty: product.qty - item.qty })
             .eq("id", item.productId);
 
-          // log stock movement
           await supabase.from("stock_logs").insert({
             product_id: item.productId,
             type: "sale",
@@ -164,8 +164,8 @@ const AddCustomer = () => {
 
       toast.success("Purchase recorded successfully!");
       navigate("/dashboard");
-    } catch (error: any) {
-      toast.error(error.message || "Failed to record purchase");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to submit");
     } finally {
       setLoading(false);
     }
@@ -178,7 +178,9 @@ const AddCustomer = () => {
           <h1 className="text-4xl font-bold mb-2 bg-gradient-primary bg-clip-text text-transparent">
             Add Customer Purchase
           </h1>
-          <p className="text-muted-foreground">Create a new purchase and customer</p>
+          <p className="text-muted-foreground">
+            Create a new purchase and customer
+          </p>
         </div>
 
         <Card className="p-6 backdrop-blur-xl bg-white/50 border-white/20 shadow-glass">
@@ -204,11 +206,16 @@ const AddCustomer = () => {
               </div>
             </div>
 
-            {/* Products */}
+            {/* Products list */}
             <div className="space-y-4">
               <div className="flex justify-between items-center">
                 <Label className="text-lg">Products</Label>
-                <Button type="button" variant="outline" size="sm" onClick={addMoreProducts}>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={addMoreProducts}
+                >
                   <Plus className="w-4 h-4 mr-2" /> Add More
                 </Button>
               </div>
@@ -221,7 +228,9 @@ const AddCustomer = () => {
 
                       <Select
                         value={item.productId}
-                        onValueChange={(value) => updateSaleItem(index, "productId", value)}
+                        onValueChange={(value) =>
+                          updateSaleItem(index, "productId", value)
+                        }
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Select product" />
@@ -230,11 +239,14 @@ const AddCustomer = () => {
                         <SelectContent>
                           {products
                             .filter(
-                              (product) => product.qty > 0 && product.is_deleted === false
+                              (product) =>
+                                Number(product.qty) > 0 &&
+                                product.category !== "__archived__"
                             )
                             .map((product) => (
                               <SelectItem key={product.id} value={product.id}>
-                                {product.name} - ₹{product.price} (Stock: {product.qty})
+                                {product.name} - ₹{product.price} (Stock:{" "}
+                                {product.qty})
                               </SelectItem>
                             ))}
                         </SelectContent>
@@ -248,7 +260,11 @@ const AddCustomer = () => {
                         min="1"
                         value={item.qty}
                         onChange={(e) =>
-                          updateSaleItem(index, "qty", parseInt(e.target.value))
+                          updateSaleItem(
+                            index,
+                            "qty",
+                            parseInt(e.target.value)
+                          )
                         }
                       />
                     </div>
@@ -282,12 +298,18 @@ const AddCustomer = () => {
             {/* Total */}
             <div className="p-4 bg-gradient-primary rounded-lg text-white flex justify-between">
               <span className="text-xl font-bold">Total:</span>
-              <span className="text-3xl font-bold">₹{calculateTotal().toFixed(2)}</span>
+              <span className="text-3xl font-bold">
+                ₹{calculateTotal().toFixed(2)}
+              </span>
             </div>
 
             {/* Buttons */}
             <div className="flex gap-3">
-              <Button type="submit" className="flex-1 bg-gradient-primary" disabled={loading}>
+              <Button
+                type="submit"
+                className="flex-1 bg-gradient-primary"
+                disabled={loading}
+              >
                 <ShoppingCart className="w-4 h-4 mr-2" />
                 {loading ? "Processing..." : "Complete Purchase"}
               </Button>
