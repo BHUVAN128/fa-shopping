@@ -44,29 +44,25 @@ interface Product {
 const Products = () => {
   const navigate = useNavigate();
 
-  // PRODUCT DATA
   const [products, setProducts] = useState<Product[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
 
-  // PAGINATION
   const limit = 50;
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
-  const observerRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(false);
 
-  // EDIT QUANTITY
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [newQty, setNewQty] = useState<number>(0);
+  const observerRef = useRef<IntersectionObserver | null>(null);
 
-  // DELETE HANDLING
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [newQty, setNewQty] = useState(0);
   const [deleteError, setDeleteError] = useState("");
 
   // -------------------------------------------------------
-  // FETCH PRODUCTS (LIMIT + OFFSET)
+  // FETCH PRODUCTS
   // -------------------------------------------------------
-  const fetchProducts = async () => {
-    if (loading || !hasMore) return;
+  const fetchProducts = async (reset = false) => {
+    if (loading) return;
 
     setLoading(true);
 
@@ -87,34 +83,35 @@ const Products = () => {
 
     if (data.length < limit) setHasMore(false);
 
-    setProducts((prev) => [...prev, ...data]);
+    setProducts((prev) => (reset ? data : [...prev, ...data]));
     setLoading(false);
   };
 
-  // Load First Page
-  useEffect(() => {
-    setProducts([]);
-    setPage(1);
-    setHasMore(true);
-  }, [searchTerm]);
-
-  // Fetch when page changes
+  // Initial load
   useEffect(() => {
     fetchProducts();
   }, [page]);
 
+  // When search changes → FULL RESET
+  useEffect(() => {
+    setProducts([]);
+    setPage(1);
+    setHasMore(true);
+    fetchProducts(true);
+  }, [searchTerm]);
+
   // -------------------------------------------------------
-  // INFINITE SCROLL OBSERVER
+  // INFINITE SCROLL TRIGGER
   // -------------------------------------------------------
   const lastElementRef = useCallback(
-    (node: HTMLDivElement) => {
+    (node: HTMLTableRowElement | null) => {
       if (loading) return;
 
       if (observerRef.current) observerRef.current.disconnect();
 
       observerRef.current = new IntersectionObserver((entries) => {
         if (entries[0].isIntersecting && hasMore) {
-          setPage((prev) => prev + 1);
+          setPage((p) => p + 1);
         }
       });
 
@@ -123,59 +120,49 @@ const Products = () => {
     [loading, hasMore]
   );
 
-  // -------------------------------------------------------
-  // SEARCH FILTER
-  // -------------------------------------------------------
-  const filtered = products.filter(
+  // FILTER SEARCH
+  const filteredProducts = products.filter(
     (p) =>
       p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.category.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
-  // -------------------------------------------------------
   // UPDATE QUANTITY
-  // -------------------------------------------------------
   const updateQuantity = async (id: string) => {
-    if (newQty < 0) {
-      toast.error("Quantity cannot be negative");
-      return;
-    }
+    if (newQty < 0) return toast.error("Quantity cannot be negative");
 
     const { error } = await supabase
       .from("products")
       .update({ qty: newQty })
       .eq("id", id);
 
-    if (error) toast.error("Failed to update quantity");
+    if (error) toast.error("Failed to update");
     else {
-      toast.success("Quantity updated");
+      toast.success("Updated!");
+
       setProducts((prev) =>
         prev.map((p) => (p.id === id ? { ...p, qty: newQty } : p))
       );
+
       setEditingId(null);
     }
   };
 
-  // -------------------------------------------------------
   // ARCHIVE PRODUCT
-  // -------------------------------------------------------
   const handleDelete = async (product: Product) => {
     const { error } = await supabase
       .from("products")
       .update({ category: "__archived__" })
       .eq("id", product.id);
 
-    if (error) {
-      toast.error("Failed to archive product");
-      return;
-    }
+    if (error) return toast.error("Failed");
 
     toast.success("Product archived");
     setProducts((prev) => prev.filter((p) => p.id !== product.id));
   };
 
   // -------------------------------------------------------
-  // UI STARTS HERE
+  // UI
   // -------------------------------------------------------
   return (
     <Layout>
@@ -195,7 +182,6 @@ const Products = () => {
         </div>
 
         <Card className="p-6 backdrop-blur-xl bg-white/50 border-white/20 shadow-glass">
-
           {/* SEARCH BAR */}
           <div className="mb-6 flex gap-2 items-center">
             <div className="relative flex-1">
@@ -206,6 +192,7 @@ const Products = () => {
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10 pr-10"
               />
+
               {searchTerm && (
                 <button
                   onClick={() => setSearchTerm("")}
@@ -217,7 +204,7 @@ const Products = () => {
             </div>
           </div>
 
-          {/* PRODUCT TABLE */}
+          {/* TABLE */}
           <div className="rounded-lg border overflow-hidden">
             <Table>
               <TableHeader>
@@ -232,8 +219,8 @@ const Products = () => {
               </TableHeader>
 
               <TableBody>
-                {filtered.map((product, index) => {
-                  const isLast = filtered.length === index + 1;
+                {filteredProducts.map((product, index) => {
+                  const isLast = filteredProducts.length === index + 1;
 
                   return (
                     <TableRow
@@ -244,7 +231,7 @@ const Products = () => {
                       <TableCell>{product.sku}</TableCell>
                       <TableCell>{product.category}</TableCell>
 
-                      {/* QUANTITY EDIT */}
+                      {/* Quantity edit */}
                       <TableCell>
                         {editingId === product.id ? (
                           <div className="flex items-center gap-2">
