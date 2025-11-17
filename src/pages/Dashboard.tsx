@@ -13,7 +13,7 @@ const Dashboard = () => {
     totalCustomers: 0,
     totalProducts: 0,
     todaySales: 0,
-    lowStock: 0
+    lowStock: 0,
   });
 
   useEffect(() => {
@@ -22,58 +22,49 @@ const Dashboard = () => {
 
   const fetchStats = async () => {
     try {
-      // --------------------------
-      // 1️⃣ FETCH CUSTOMERS COUNT
-      // --------------------------
+      // 1️⃣ CUSTOMER COUNT
       const { count: customerCount, error: custError } = await supabase
         .from("customers")
         .select("*", { count: "exact", head: true });
 
       if (custError) throw custError;
 
-      // --------------------------
-      // 2️⃣ FETCH PRODUCTS
-      // --------------------------
+      // 2️⃣ PRODUCTS
       const { data: products, error: prodError } = await supabase
         .from("products")
         .select("*");
 
       if (prodError) throw prodError;
 
-      // --------------------------
-      // 3️⃣ CALCULATE TODAY’S SALES
-      // --------------------------
+      // -----------------------------------
+      // 3️⃣ TODAY SALES (consistent function)
+      // -----------------------------------
       const today = new Date();
       today.setHours(0, 0, 0, 0);
+      const startOfDay = today.toISOString().split("T")[0] + "T00:00:00.000Z";
 
-      const { data: todaySalesData, error: salesError } = await supabase
+      const { data: salesData, error: salesError } = await supabase
         .from("sales")
         .select("total")
-        .gte("created_at", today.toISOString());
+        .gte("created_at", startOfDay);
 
       if (salesError) throw salesError;
 
       const todayTotal =
-        todaySalesData?.reduce((sum, sale) => sum + Number(sale.total), 0) || 0;
+        salesData?.reduce((sum, sale) => sum + Number(sale.total), 0) || 0;
 
-      // --------------------------
       // 4️⃣ LOW STOCK (qty <= 2)
-      // --------------------------
-      const lowStockCount =
-        products?.filter((p) => Number(p.qty) <= 2).length || 0;
+      const lowStockCount = products?.filter((p) => Number(p.qty) <= 2).length || 0;
 
-      // --------------------------
-      // 5️⃣ SET FINAL STATS
-      // --------------------------
       setStats({
         totalCustomers: customerCount || 0,
         totalProducts: products?.length || 0,
         todaySales: todayTotal,
-        lowStock: lowStockCount
+        lowStock: lowStockCount,
       });
     } catch (error: any) {
-      console.error("🔥 DASHBOARD ERROR:", error.message || error);
-      toast.error(error.message || "Failed to load dashboard stats");
+      console.error("Dashboard Error:", error.message);
+      toast.error("Failed to load dashboard stats");
     }
   };
 
@@ -118,6 +109,7 @@ const Dashboard = () => {
           <p className="text-muted-foreground">Welcome to FA Shopping</p>
         </div>
 
+        {/* STAT CARDS */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {statCards.map((stat) => {
             const Icon = stat.icon;
@@ -125,15 +117,14 @@ const Dashboard = () => {
               <Card
                 key={stat.title}
                 onClick={stat.onClick}
-                className="p-6 cursor-pointer backdrop-blur-xl bg-white/50 border-white/20 shadow-glass hover:shadow-glow transition-all duration-300 hover:-translate-y-1"
+                className="p-6 cursor-pointer backdrop-blur-xl bg-white/50 border-white/20 shadow-glass hover:shadow-glow transition-all"
               >
                 <div className="flex items-start justify-between">
                   <div>
-                    <p className="text-muted-foreground text-sm mb-2">{stat.title}</p>
-                    <p className="text-3xl font-bold text-foreground">{stat.value}</p>
+                    <p className="text-muted-foreground text-sm">{stat.title}</p>
+                    <p className="text-3xl font-bold">{stat.value}</p>
                   </div>
-
-                  <div className={`p-3 rounded-xl ${stat.gradient} shadow-lg`}>
+                  <div className={`p-3 rounded-xl ${stat.gradient}`}>
                     <Icon className="w-6 h-6 text-white" />
                   </div>
                 </div>
@@ -142,32 +133,31 @@ const Dashboard = () => {
           })}
         </div>
 
+        {/* QUICK ACTIONS */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <Card
-            className="p-8 backdrop-blur-xl bg-gradient-primary border-0 shadow-glow hover:shadow-xl transition-all duration-300 hover:-translate-y-1 cursor-pointer group"
+            className="p-8 backdrop-blur-xl bg-gradient-primary cursor-pointer group"
             onClick={() => navigate("/add-customer")}
           >
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-2xl font-bold text-white mb-2">Add Customer</h3>
-                <p className="text-white/80">Create new purchase</p>
+                <h3 className="text-2xl font-bold text-white">Add Customer</h3>
               </div>
-              <div className="p-4 rounded-2xl bg-white/20 group-hover:bg-white/30 transition-colors">
+              <div className="p-4 rounded-2xl bg-white/20 group-hover:bg-white/30">
                 <UserPlus className="w-8 h-8 text-white" />
               </div>
             </div>
           </Card>
 
           <Card
-            className="p-8 backdrop-blur-xl bg-gradient-secondary border-0 shadow-glow hover:shadow-xl transition-all duration-300 hover:-translate-y-1 cursor-pointer group"
+            className="p-8 backdrop-blur-xl bg-gradient-secondary cursor-pointer group"
             onClick={() => navigate("/add-product")}
           >
             <div className="flex items-center justify-between">
               <div>
-                <h3 className="text-2xl font-bold text-white mb-2">Add Product</h3>
-                <p className="text-white/80">Add new inventory</p>
+                <h3 className="text-2xl font-bold text-white">Add Product</h3>
               </div>
-              <div className="p-4 rounded-2xl bg-white/20 group-hover:bg-white/30 transition-colors">
+              <div className="p-4 rounded-2xl bg-white/20 group-hover:bg-white/30">
                 <PackagePlus className="w-8 h-8 text-white" />
               </div>
             </div>
