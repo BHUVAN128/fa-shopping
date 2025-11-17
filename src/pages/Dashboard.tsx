@@ -13,7 +13,7 @@ const Dashboard = () => {
     totalCustomers: 0,
     totalProducts: 0,
     todaySales: 0,
-    lowStock: 0,
+    lowStock: 0
   });
 
   useEffect(() => {
@@ -22,65 +22,61 @@ const Dashboard = () => {
 
   const fetchStats = async () => {
     try {
-      /** 🟦 TOTAL CUSTOMERS */
-      const { data: customers, error: custError } = await supabase
+      // --------------------------
+      // 1️⃣ FETCH CUSTOMERS COUNT
+      // --------------------------
+      const { count: customerCount, error: custError } = await supabase
         .from("customers")
-        .select("*");
+        .select("*", { count: "exact", head: true });
 
       if (custError) throw custError;
 
-      /** 🟦 TOTAL PRODUCTS */
+      // --------------------------
+      // 2️⃣ FETCH PRODUCTS
+      // --------------------------
       const { data: products, error: prodError } = await supabase
         .from("products")
-        .select("*")
-        .neq("is_deleted", true);
+        .select("*");
 
       if (prodError) throw prodError;
 
-      /** 🟦 CORRECT TODAY SALES (IST FIXED) */
-      const now = new Date();
-
-      // Local midnight
-      const localStart = new Date(
-        now.getFullYear(),
-        now.getMonth(),
-        now.getDate(),
-        0, 0, 0
-      );
-
-      // Convert to UTC ISO format
-      const todayStartUTC = new Date(
-        localStart.getTime() - localStart.getTimezoneOffset() * 60000
-      ).toISOString();
+      // --------------------------
+      // 3️⃣ CALCULATE TODAY’S SALES
+      // --------------------------
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
 
       const { data: todaySalesData, error: salesError } = await supabase
         .from("sales")
         .select("total")
-        .gte("created_at", todayStartUTC);
+        .gte("created_at", today.toISOString());
 
       if (salesError) throw salesError;
 
       const todayTotal =
-        todaySalesData?.reduce((sum, s) => sum + Number(s.total), 0) || 0;
+        todaySalesData?.reduce((sum, sale) => sum + Number(sale.total), 0) || 0;
 
-      /** 🟦 LOW STOCK COUNT */
+      // --------------------------
+      // 4️⃣ LOW STOCK (qty <= 2)
+      // --------------------------
       const lowStockCount =
-        products?.filter((p) => p.qty <= p.low_stock_threshold).length || 0;
+        products?.filter((p) => Number(p.qty) <= 2).length || 0;
 
-      /** 🟦 SET STATS */
+      // --------------------------
+      // 5️⃣ SET FINAL STATS
+      // --------------------------
       setStats({
-        totalCustomers: customers?.length || 0,
+        totalCustomers: customerCount || 0,
         totalProducts: products?.length || 0,
         todaySales: todayTotal,
-        lowStock: lowStockCount,
+        lowStock: lowStockCount
       });
-    } catch (err) {
-      console.error(err);
-      toast.error("Failed to load dashboard stats");
+    } catch (error: any) {
+      console.error("🔥 DASHBOARD ERROR:", error.message || error);
+      toast.error(error.message || "Failed to load dashboard stats");
     }
   };
 
-  /** DASHBOARD CARDS */
   const statCards = [
     {
       title: "Total Customers",
@@ -116,13 +112,12 @@ const Dashboard = () => {
     <Layout>
       <div className="space-y-8">
         <div>
-          <h1 className="text-4xl font-bold bg-gradient-primary bg-clip-text text-transparent">
+          <h1 className="text-4xl font-bold mb-2 bg-gradient-primary bg-clip-text text-transparent">
             Dashboard
           </h1>
           <p className="text-muted-foreground">Welcome to FA Shopping</p>
         </div>
 
-        {/* STATS */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
           {statCards.map((stat) => {
             const Icon = stat.icon;
@@ -130,15 +125,16 @@ const Dashboard = () => {
               <Card
                 key={stat.title}
                 onClick={stat.onClick}
-                className="p-6 cursor-pointer bg-white/50 backdrop-blur-xl shadow-glass hover:shadow-glow hover:-translate-y-1 transition-all"
+                className="p-6 cursor-pointer backdrop-blur-xl bg-white/50 border-white/20 shadow-glass hover:shadow-glow transition-all duration-300 hover:-translate-y-1"
               >
-                <div className="flex justify-between items-start">
+                <div className="flex items-start justify-between">
                   <div>
-                    <p className="text-muted-foreground text-sm">{stat.title}</p>
-                    <p className="text-3xl font-bold">{stat.value}</p>
+                    <p className="text-muted-foreground text-sm mb-2">{stat.title}</p>
+                    <p className="text-3xl font-bold text-foreground">{stat.value}</p>
                   </div>
-                  <div className={`p-3 rounded-xl ${stat.gradient}`}>
-                    <Icon className="text-white w-6 h-6" />
+
+                  <div className={`p-3 rounded-xl ${stat.gradient} shadow-lg`}>
+                    <Icon className="w-6 h-6 text-white" />
                   </div>
                 </div>
               </Card>
@@ -146,22 +142,35 @@ const Dashboard = () => {
           })}
         </div>
 
-        {/* QUICK ACTIONS */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <Card
-            className="p-8 bg-gradient-primary text-white cursor-pointer hover:-translate-y-1 transition-all"
+            className="p-8 backdrop-blur-xl bg-gradient-primary border-0 shadow-glow hover:shadow-xl transition-all duration-300 hover:-translate-y-1 cursor-pointer group"
             onClick={() => navigate("/add-customer")}
           >
-            <h3 className="text-2xl font-bold">Add Customer</h3>
-            <p>Create new purchase</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-2xl font-bold text-white mb-2">Add Customer</h3>
+                <p className="text-white/80">Create new purchase</p>
+              </div>
+              <div className="p-4 rounded-2xl bg-white/20 group-hover:bg-white/30 transition-colors">
+                <UserPlus className="w-8 h-8 text-white" />
+              </div>
+            </div>
           </Card>
 
           <Card
-            className="p-8 bg-gradient-secondary text-white cursor-pointer hover:-translate-y-1 transition-all"
+            className="p-8 backdrop-blur-xl bg-gradient-secondary border-0 shadow-glow hover:shadow-xl transition-all duration-300 hover:-translate-y-1 cursor-pointer group"
             onClick={() => navigate("/add-product")}
           >
-            <h3 className="text-2xl font-bold">Add Product</h3>
-            <p>Add new inventory</p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h3 className="text-2xl font-bold text-white mb-2">Add Product</h3>
+                <p className="text-white/80">Add new inventory</p>
+              </div>
+              <div className="p-4 rounded-2xl bg-white/20 group-hover:bg-white/30 transition-colors">
+                <PackagePlus className="w-8 h-8 text-white" />
+              </div>
+            </div>
           </Card>
         </div>
       </div>
