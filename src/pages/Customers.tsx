@@ -26,6 +26,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { Search, Eye, Trash2 } from "lucide-react";
+import * as XLSX from "xlsx"; // ⭐ Excel export library
 
 interface Customer {
   id: string;
@@ -56,7 +57,7 @@ const Customers = () => {
           c.name.toLowerCase().includes(search.toLowerCase())
       );
       setFilteredCustomers(filtered);
-      setCurrentPage(1); // Reset page when searching
+      setCurrentPage(1);
     } else {
       setFilteredCustomers(customers);
     }
@@ -82,7 +83,6 @@ const Customers = () => {
   const handleDelete = async (id: string) => {
     try {
       const { error } = await supabase.from("customers").delete().eq("id", id);
-
       if (error) throw error;
 
       toast.success("Customer deleted successfully");
@@ -91,6 +91,23 @@ const Customers = () => {
       console.error("Delete customer error:", error);
       toast.error(error.message || "Failed to delete customer");
     }
+  };
+
+  // ⭐ EXPORT TO EXCEL
+  const exportToExcel = () => {
+    const data = filteredCustomers.map((c) => ({
+      Name: c.name,
+      Phone: c.phone,
+      Joined: new Date(c.created_at).toLocaleString("en-IN"),
+    }));
+
+    const sheet = XLSX.utils.json_to_sheet(data);
+    const workbook = XLSX.utils.book_new();
+
+    XLSX.utils.book_append_sheet(workbook, sheet, "Customers");
+    XLSX.writeFile(workbook, "customers.xlsx");
+
+    toast.success("Customers exported successfully!");
   };
 
   // ⭐ PAGINATION LOGIC
@@ -103,6 +120,7 @@ const Customers = () => {
   return (
     <Layout>
       <div className="space-y-6">
+        {/* HEADER */}
         <div className="flex justify-between items-center">
           <div>
             <h1 className="text-4xl font-bold mb-2 bg-gradient-primary bg-clip-text text-transparent">
@@ -110,14 +128,22 @@ const Customers = () => {
             </h1>
             <p className="text-muted-foreground">Manage your customers</p>
           </div>
-          <Button
-            onClick={() => navigate("/add-customer")}
-            className="bg-gradient-primary"
-          >
-            Add Customer
-          </Button>
+
+          <div className="flex gap-3">
+            <Button onClick={exportToExcel} className="bg-gradient-secondary">
+              Export to Excel
+            </Button>
+
+            <Button
+              onClick={() => navigate("/add-customer")}
+              className="bg-gradient-primary"
+            >
+              Add Customer
+            </Button>
+          </div>
         </div>
 
+        {/* SEARCH + TABLE */}
         <Card className="p-6 backdrop-blur-xl bg-white/50 border-white/20 shadow-glass">
           <div className="mb-6">
             <div className="relative">
@@ -162,7 +188,9 @@ const Customers = () => {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => navigate(`/customer/${customer.id}`)}
+                          onClick={() =>
+                            navigate(`/customer/${customer.id}`)
+                          }
                         >
                           <Eye className="w-4 h-4 mr-2" />
                           View Details
