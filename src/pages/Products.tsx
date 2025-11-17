@@ -44,34 +44,48 @@ interface Product {
 const Products = () => {
   const navigate = useNavigate();
 
+  // PRODUCT DATA
   const [products, setProducts] = useState<Product[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
 
+  // CATEGORY FILTER
+  const [categoryFilter, setCategoryFilter] = useState("all");
+
+  // PAGINATION (INFINITE SCROLL)
   const limit = 50;
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
+  const observerRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(false);
 
-  const observerRef = useRef<IntersectionObserver | null>(null);
-
+  // EDIT QUANTITY
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [newQty, setNewQty] = useState(0);
+  const [newQty, setNewQty] = useState<number>(0);
+
+  // DELETE ERROR
   const [deleteError, setDeleteError] = useState("");
 
   // -------------------------------------------------------
-  // FETCH PRODUCTS
+  // FETCH PRODUCTS (FILTER + SEARCH + PAGINATION)
   // -------------------------------------------------------
   const fetchProducts = async (reset = false) => {
     if (loading) return;
 
     setLoading(true);
-
     const offset = (page - 1) * limit;
 
-    const { data, error } = await supabase
+    let query = supabase
       .from("products")
       .select("*")
-      .neq("category", "__archived__")
+      .neq("category", "__archived__");
+
+    // Apply category filter
+    if (categoryFilter !== "all") {
+      query = query.eq("category", categoryFilter);
+    }
+
+    // Fetch data
+    const { data, error } = await query
       .order("created_at", { ascending: false })
       .range(offset, offset + limit - 1);
 
@@ -87,12 +101,15 @@ const Products = () => {
     setLoading(false);
   };
 
-  // Initial load
+  // RESET LIST WHEN CATEGORY CHANGES
   useEffect(() => {
-    fetchProducts();
-  }, [page]);
+    setProducts([]);
+    setPage(1);
+    setHasMore(true);
+    fetchProducts(true);
+  }, [categoryFilter]);
 
-  // When search changes → FULL RESET
+  // RESET LIST WHEN SEARCH CHANGES
   useEffect(() => {
     setProducts([]);
     setPage(1);
@@ -100,18 +117,23 @@ const Products = () => {
     fetchProducts(true);
   }, [searchTerm]);
 
+  // Fetch when page changes
+  useEffect(() => {
+    fetchProducts();
+  }, [page]);
+
   // -------------------------------------------------------
-  // INFINITE SCROLL TRIGGER
+  // INFINITE SCROLL OBSERVER
   // -------------------------------------------------------
   const lastElementRef = useCallback(
-    (node: HTMLTableRowElement | null) => {
+    (node: HTMLDivElement) => {
       if (loading) return;
 
       if (observerRef.current) observerRef.current.disconnect();
 
       observerRef.current = new IntersectionObserver((entries) => {
         if (entries[0].isIntersecting && hasMore) {
-          setPage((p) => p + 1);
+          setPage((prev) => prev + 1);
         }
       });
 
@@ -120,49 +142,59 @@ const Products = () => {
     [loading, hasMore]
   );
 
-  // FILTER SEARCH
-  const filteredProducts = products.filter(
+  // -------------------------------------------------------
+  // SEARCH FILTER
+  // -------------------------------------------------------
+  const filtered = products.filter(
     (p) =>
       p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       p.category.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  // -------------------------------------------------------
   // UPDATE QUANTITY
+  // -------------------------------------------------------
   const updateQuantity = async (id: string) => {
-    if (newQty < 0) return toast.error("Quantity cannot be negative");
+    if (newQty < 0) {
+      toast.error("Quantity cannot be negative");
+      return;
+    }
 
     const { error } = await supabase
       .from("products")
       .update({ qty: newQty })
       .eq("id", id);
 
-    if (error) toast.error("Failed to update");
+    if (error) toast.error("Failed to update quantity");
     else {
-      toast.success("Updated!");
-
+      toast.success("Quantity updated");
       setProducts((prev) =>
         prev.map((p) => (p.id === id ? { ...p, qty: newQty } : p))
       );
-
       setEditingId(null);
     }
   };
 
+  // -------------------------------------------------------
   // ARCHIVE PRODUCT
+  // -------------------------------------------------------
   const handleDelete = async (product: Product) => {
     const { error } = await supabase
       .from("products")
       .update({ category: "__archived__" })
       .eq("id", product.id);
 
-    if (error) return toast.error("Failed");
+    if (error) {
+      toast.error("Failed to archive product");
+      return;
+    }
 
     toast.success("Product archived");
     setProducts((prev) => prev.filter((p) => p.id !== product.id));
   };
 
   // -------------------------------------------------------
-  // UI
+  // UI START
   // -------------------------------------------------------
   return (
     <Layout>
@@ -175,13 +207,17 @@ const Products = () => {
             <p className="text-muted-foreground">Manage your product inventory</p>
           </div>
 
-          <Button onClick={() => navigate("/add-product")} className="bg-gradient-secondary">
+          <Button
+            onClick={() => navigate("/add-product")}
+            className="bg-gradient-secondary"
+          >
             <Plus className="w-4 h-4 mr-2" />
             Add Product
           </Button>
         </div>
 
         <Card className="p-6 backdrop-blur-xl bg-white/50 border-white/20 shadow-glass">
+
           {/* SEARCH BAR */}
           <div className="mb-6 flex gap-2 items-center">
             <div className="relative flex-1">
@@ -192,7 +228,6 @@ const Products = () => {
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10 pr-10"
               />
-
               {searchTerm && (
                 <button
                   onClick={() => setSearchTerm("")}
@@ -204,7 +239,23 @@ const Products = () => {
             </div>
           </div>
 
-          {/* TABLE */}
+          {/* CATEGORY FILTER BUTTONS */}
+          <div className="flex gap-3 mb-4 flex-wrap">
+            {["all", "Mobiles", "Accessories", "Laptops", "Speakers"].map(
+              (cat) => (
+                <Button
+                  key={cat}
+                  variant={categoryFilter === cat ? "default" : "outline"}
+                  onClick={() => setCategoryFilter(cat)}
+                  className="capitalize"
+                >
+                  {cat === "all" ? "All Categories" : cat}
+                </Button>
+              )
+            )}
+          </div>
+
+          {/* PRODUCT TABLE */}
           <div className="rounded-lg border overflow-hidden">
             <Table>
               <TableHeader>
@@ -219,8 +270,8 @@ const Products = () => {
               </TableHeader>
 
               <TableBody>
-                {filteredProducts.map((product, index) => {
-                  const isLast = filteredProducts.length === index + 1;
+                {filtered.map((product, index) => {
+                  const isLast = filtered.length === index + 1;
 
                   return (
                     <TableRow
@@ -231,20 +282,29 @@ const Products = () => {
                       <TableCell>{product.sku}</TableCell>
                       <TableCell>{product.category}</TableCell>
 
-                      {/* Quantity edit */}
+                      {/* QUANTITY EDIT */}
                       <TableCell>
                         {editingId === product.id ? (
                           <div className="flex items-center gap-2">
                             <Input
                               type="number"
                               value={newQty}
-                              onChange={(e) => setNewQty(Number(e.target.value))}
+                              onChange={(e) =>
+                                setNewQty(Number(e.target.value))
+                              }
                               className="w-24"
                             />
-                            <Button size="sm" onClick={() => updateQuantity(product.id)}>
+                            <Button
+                              size="sm"
+                              onClick={() => updateQuantity(product.id)}
+                            >
                               Save
                             </Button>
-                            <Button size="sm" variant="outline" onClick={() => setEditingId(null)}>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setEditingId(null)}
+                            >
                               Cancel
                             </Button>
                           </div>
@@ -292,20 +352,27 @@ const Products = () => {
                           <AlertDialogContent>
                             <AlertDialogHeader>
                               <AlertDialogTitle>
-                                {deleteError ? "Cannot Delete" : "Are you sure?"}
+                                {deleteError
+                                  ? "Cannot Delete"
+                                  : "Are you sure?"}
                               </AlertDialogTitle>
                               <AlertDialogDescription>
-                                {deleteError || "This action cannot be undone."}
+                                {deleteError ||
+                                  "This action cannot be undone."}
                               </AlertDialogDescription>
                             </AlertDialogHeader>
 
                             <AlertDialogFooter>
-                              <AlertDialogCancel onClick={() => setDeleteError("")}>
+                              <AlertDialogCancel
+                                onClick={() => setDeleteError("")}
+                              >
                                 {deleteError ? "OK" : "Cancel"}
                               </AlertDialogCancel>
 
                               {!deleteError && (
-                                <AlertDialogAction onClick={() => handleDelete(product)}>
+                                <AlertDialogAction
+                                  onClick={() => handleDelete(product)}
+                                >
                                   Delete
                                 </AlertDialogAction>
                               )}
