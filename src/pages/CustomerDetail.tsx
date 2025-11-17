@@ -6,7 +6,8 @@ import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { ArrowLeft, User, Phone, DollarSign } from "lucide-react";
+import { ArrowLeft, User, Phone, IndianRupee } from "lucide-react";
+
 
 interface Customer {
   id: string;
@@ -128,7 +129,7 @@ const CustomerDetail = () => {
           </Card>
 
           <Card className="p-6 backdrop-blur-xl bg-gradient-accent border-0 shadow-glow text-white">
-            <DollarSign className="w-8 h-8 mb-3" />
+            <IndianRupee className="w-8 h-8 mb-3" />
             <p className="text-sm opacity-80 mb-1">Total Spent</p>
             <p className="text-2xl font-bold">₹{totalSpent.toFixed(2)}</p>
           </Card>
