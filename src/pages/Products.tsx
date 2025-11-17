@@ -44,96 +44,133 @@ interface Product {
 const Products = () => {
   const navigate = useNavigate();
 
-  // PRODUCT DATA
+  // data + ui
   const [products, setProducts] = useState<Product[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [categories, setCategories] = useState<string[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState<string>("All");
 
-  // CATEGORY FILTER
-  const [categoryFilter, setCategoryFilter] = useState("all");
-
-  // PAGINATION (INFINITE SCROLL)
+  // pagination / infinite scroll
   const limit = 50;
   const [page, setPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
-  const observerRef = useRef<HTMLDivElement | null>(null);
   const [loading, setLoading] = useState(false);
+  const observerRef = useRef<IntersectionObserver | null>(null);
 
-  // EDIT QUANTITY
+  // edit qty
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newQty, setNewQty] = useState<number>(0);
 
-  // DELETE ERROR
-  const [deleteError, setDeleteError] = useState("");
+  // delete handling
+  const [deleteError, setDeleteError] = useState<string>("");
 
-  // -------------------------------------------------------
-  // FETCH PRODUCTS (FILTER + SEARCH + PAGINATION)
-  // -------------------------------------------------------
-  const fetchProducts = async (reset = false) => {
-    if (loading) return;
+  // Reset list when filters/search change
+  useEffect(() => {
+    setProducts([]);
+    setPage(1);
+    setHasMore(true);
+  }, [searchTerm, selectedCategory]);
 
-    setLoading(true);
-    const offset = (page - 1) * limit;
+  // Load categories once
+  useEffect(() => {
+    loadCategories();
+  }, []);
 
-    let query = supabase
-      .from("products")
-      .select("*")
-      .neq("category", "__archived__");
+  const loadCategories = async () => {
+    try {
+      // Fetch categories, then dedupe client-side to ensure all are included
+      const { data, error } = await supabase
+        .from("products")
+        .select("category")
+        .neq("category", "__archived__");
 
-    // Apply category filter
-    if (categoryFilter !== "all") {
-      query = query.eq("category", categoryFilter);
+      if (error) throw error;
+
+      const uniq = Array.from(
+        new Set((data || []).map((r: any) => (r.category || "Uncategorized") as string))
+      );
+      uniq.sort();
+      setCategories(["All", ...uniq]);
+    } catch (err: any) {
+      console.error("Failed to load categories", err);
+      toast.error("Failed to load categories");
     }
-
-    // Fetch data
-    const { data, error } = await query
-      .order("created_at", { ascending: false })
-      .range(offset, offset + limit - 1);
-
-    if (error) {
-      toast.error("Failed to load products");
-      setLoading(false);
-      return;
-    }
-
-    if (data.length < limit) setHasMore(false);
-
-    setProducts((prev) => (reset ? data : [...prev, ...data]));
-    setLoading(false);
   };
 
-  // RESET LIST WHEN CATEGORY CHANGES
-  useEffect(() => {
-    setProducts([]);
-    setPage(1);
-    setHasMore(true);
-    fetchProducts(true);
-  }, [categoryFilter]);
+  // Fetch products page (server-side range)
+  const fetchProducts = async () => {
+    if (loading || !hasMore) return;
+    setLoading(true);
 
-  // RESET LIST WHEN SEARCH CHANGES
-  useEffect(() => {
-    setProducts([]);
-    setPage(1);
-    setHasMore(true);
-    fetchProducts(true);
-  }, [searchTerm]);
+    try {
+      const offset = (page - 1) * limit;
+      let query = supabase
+        .from("products")
+        .select("*")
+        .neq("category", "__archived__")
+        .order("created_at", { ascending: false })
+        .range(offset, offset + limit - 1);
 
-  // Fetch when page changes
+      // apply category filter server-side if not "All"
+      if (selectedCategory && selectedCategory !== "All") {
+        query = query.eq("category", selectedCategory);
+      }
+
+      // apply search server-side if present (search in name or sku)
+      if (searchTerm && searchTerm.trim().length > 0) {
+        const term = `%${searchTerm.trim()}%`;
+        // Use ilike for case-insensitive partial match
+        query = query.or(`name.ilike.${term},sku.ilike.${term},category.ilike.${term}`);
+      }
+
+      const { data, error } = await query;
+
+      if (error) {
+        console.error("Fetch products error:", error);
+        toast.error("Failed to load products");
+        setLoading(false);
+        return;
+      }
+
+      const fetched = data as Product[];
+
+      // If fewer than limit returned, there is no more
+      if (!fetched || fetched.length < limit) {
+        setHasMore(false);
+      }
+
+      // Append results (avoid duplicates)
+      setProducts((prev) => {
+        const ids = new Set(prev.map((p) => p.id));
+        const merged = [...prev];
+        for (const p of fetched || []) {
+          if (!ids.has(p.id)) merged.push(p);
+        }
+        return merged;
+      });
+    } catch (err: any) {
+      console.error("Fetch products failed:", err);
+      toast.error("Failed to fetch products");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // fetch when page changes
   useEffect(() => {
     fetchProducts();
-  }, [page]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, selectedCategory, searchTerm]);
 
-  // -------------------------------------------------------
-  // INFINITE SCROLL OBSERVER
-  // -------------------------------------------------------
+  // infinite scroll observer
   const lastElementRef = useCallback(
-    (node: HTMLDivElement) => {
+    (node: HTMLTableRowElement | null) => {
       if (loading) return;
-
       if (observerRef.current) observerRef.current.disconnect();
 
       observerRef.current = new IntersectionObserver((entries) => {
         if (entries[0].isIntersecting && hasMore) {
-          setPage((prev) => prev + 1);
+          setPage((p) => p + 1);
         }
       });
 
@@ -142,60 +179,66 @@ const Products = () => {
     [loading, hasMore]
   );
 
-  // -------------------------------------------------------
-  // SEARCH FILTER
-  // -------------------------------------------------------
-  const filtered = products.filter(
-    (p) =>
-      p.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      p.category.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // search handler (debounce lightly)
+  useEffect(() => {
+    const id = setTimeout(() => {
+      // resetting page and list is handled by dependency effect
+      setPage(1);
+      setProducts([]);
+      setHasMore(true);
+    }, 300);
+    return () => clearTimeout(id);
+  }, [searchTerm, selectedCategory]);
 
-  // -------------------------------------------------------
-  // UPDATE QUANTITY
-  // -------------------------------------------------------
+  // update qty
   const updateQuantity = async (id: string) => {
     if (newQty < 0) {
       toast.error("Quantity cannot be negative");
       return;
     }
-
-    const { error } = await supabase
-      .from("products")
-      .update({ qty: newQty })
-      .eq("id", id);
-
-    if (error) toast.error("Failed to update quantity");
-    else {
+    try {
+      const { error } = await supabase.from("products").update({ qty: newQty }).eq("id", id);
+      if (error) {
+        console.error("Update qty error:", error);
+        toast.error("Failed to update quantity");
+        return;
+      }
+      setProducts((prev) => prev.map((p) => (p.id === id ? { ...p, qty: newQty } : p)));
       toast.success("Quantity updated");
-      setProducts((prev) =>
-        prev.map((p) => (p.id === id ? { ...p, qty: newQty } : p))
-      );
       setEditingId(null);
+    } catch (err: any) {
+      console.error(err);
+      toast.error("Failed to update quantity");
     }
   };
 
-  // -------------------------------------------------------
-  // ARCHIVE PRODUCT
-  // -------------------------------------------------------
+  // archive/delete product
   const handleDelete = async (product: Product) => {
-    const { error } = await supabase
-      .from("products")
-      .update({ category: "__archived__" })
-      .eq("id", product.id);
-
-    if (error) {
+    try {
+      const { error } = await supabase.from("products").update({ category: "__archived__" }).eq("id", product.id);
+      if (error) {
+        console.error("Archive error:", error);
+        toast.error("Failed to archive product");
+        return;
+      }
+      setProducts((prev) => prev.filter((p) => p.id !== product.id));
+      toast.success("Product archived");
+    } catch (err: any) {
+      console.error(err);
       toast.error("Failed to archive product");
-      return;
     }
-
-    toast.success("Product archived");
-    setProducts((prev) => prev.filter((p) => p.id !== product.id));
   };
 
-  // -------------------------------------------------------
-  // UI START
-  // -------------------------------------------------------
+  // filtered list for UI (search/category server-side used, but keep a final client-side filter just in case)
+  const visibleProducts = products.filter((p) => {
+    if (selectedCategory !== "All" && p.category !== selectedCategory) return false;
+    if (searchTerm.trim() !== "") {
+      const s = searchTerm.toLowerCase();
+      return p.name.toLowerCase().includes(s) || p.category.toLowerCase().includes(s) || (p.sku || "").toLowerCase().includes(s);
+    }
+    return true;
+  });
+
   return (
     <Layout>
       <div className="space-y-6">
@@ -207,55 +250,51 @@ const Products = () => {
             <p className="text-muted-foreground">Manage your product inventory</p>
           </div>
 
-          <Button
-            onClick={() => navigate("/add-product")}
-            className="bg-gradient-secondary"
-          >
+          <Button onClick={() => navigate("/add-product")} className="bg-gradient-secondary">
             <Plus className="w-4 h-4 mr-2" />
             Add Product
           </Button>
         </div>
 
         <Card className="p-6 backdrop-blur-xl bg-white/50 border-white/20 shadow-glass">
-
-          {/* SEARCH BAR */}
+          {/* Search + Category filters */}
           <div className="mb-6 flex gap-2 items-center">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-3 w-4 h-4 text-muted-foreground" />
               <Input
-                placeholder="Search by product name or category..."
+                placeholder="Search by product name, SKU or category..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10 pr-10"
               />
               {searchTerm && (
-                <button
-                  onClick={() => setSearchTerm("")}
-                  className="absolute right-3 top-3 text-muted-foreground hover:text-black"
-                >
+                <button onClick={() => setSearchTerm("")} className="absolute right-3 top-3 text-muted-foreground hover:text-black">
                   <X className="w-4 h-4" />
                 </button>
               )}
             </div>
-          </div>
 
-          {/* CATEGORY FILTER BUTTONS */}
-          <div className="flex gap-3 mb-4 flex-wrap">
-            {["all", "Mobiles", "Accessories", "Laptops", "Speakers"].map(
-              (cat) => (
-                <Button
+            {/* category filter list (horizontal scroll if many) */}
+            <div className="flex gap-2 overflow-x-auto max-w-md">
+              {categories.map((cat) => (
+                <button
                   key={cat}
-                  variant={categoryFilter === cat ? "default" : "outline"}
-                  onClick={() => setCategoryFilter(cat)}
-                  className="capitalize"
+                  onClick={() => {
+                    setSelectedCategory(cat);
+                    setProducts([]);
+                    setPage(1);
+                    setHasMore(true);
+                  }}
+                  className={`px-3 py-1 rounded-full border ${
+                    selectedCategory === cat ? "bg-foreground text-white" : "bg-white/60"
+                  }`}
                 >
-                  {cat === "all" ? "All Categories" : cat}
-                </Button>
-              )
-            )}
+                  {cat}
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* PRODUCT TABLE */}
           <div className="rounded-lg border overflow-hidden">
             <Table>
               <TableHeader>
@@ -270,119 +309,97 @@ const Products = () => {
               </TableHeader>
 
               <TableBody>
-                {filtered.map((product, index) => {
-                  const isLast = filtered.length === index + 1;
+                {visibleProducts.length === 0 && !loading ? (
+                  <TableRow>
+                    <TableCell colSpan={6} className="text-center text-muted-foreground py-8">
+                      No products found
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  visibleProducts.map((product, index) => {
+                    const isLast = index === visibleProducts.length - 1;
+                    // attach observer ref to last visible row
+                    return (
+                      <TableRow key={product.id} ref={isLast ? (el => lastElementRef(el as HTMLTableRowElement)) : null}>
+                        <TableCell>{product.name}</TableCell>
+                        <TableCell>{product.sku}</TableCell>
+                        <TableCell>{product.category}</TableCell>
 
-                  return (
-                    <TableRow
-                      key={product.id}
-                      ref={isLast ? lastElementRef : null}
-                    >
-                      <TableCell>{product.name}</TableCell>
-                      <TableCell>{product.sku}</TableCell>
-                      <TableCell>{product.category}</TableCell>
-
-                      {/* QUANTITY EDIT */}
-                      <TableCell>
-                        {editingId === product.id ? (
-                          <div className="flex items-center gap-2">
-                            <Input
-                              type="number"
-                              value={newQty}
-                              onChange={(e) =>
-                                setNewQty(Number(e.target.value))
-                              }
-                              className="w-24"
-                            />
-                            <Button
-                              size="sm"
-                              onClick={() => updateQuantity(product.id)}
-                            >
-                              Save
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => setEditingId(null)}
-                            >
-                              Cancel
-                            </Button>
-                          </div>
-                        ) : (
-                          <div className="flex items-center gap-2">
-                            <span>{product.qty}</span>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => {
-                                setEditingId(product.id);
-                                setNewQty(product.qty);
-                              }}
-                            >
-                              Edit
-                            </Button>
-
-                            {product.qty <= product.low_stock_threshold && (
-                              <Badge variant="destructive" className="gap-1">
-                                <AlertTriangle className="w-3 h-3" />
-                                Low Stock
-                              </Badge>
-                            )}
-                          </div>
-                        )}
-                      </TableCell>
-
-                      <TableCell className="font-bold">
-                        ₹{Number(product.price).toFixed(2)}
-                      </TableCell>
-
-                      <TableCell className="text-right">
-                        <AlertDialog>
-                          <AlertDialogTrigger asChild>
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              onClick={() => setDeleteError("")}
-                            >
-                              <Trash2 className="w-4 h-4 mr-2" />
-                              Delete
-                            </Button>
-                          </AlertDialogTrigger>
-
-                          <AlertDialogContent>
-                            <AlertDialogHeader>
-                              <AlertDialogTitle>
-                                {deleteError
-                                  ? "Cannot Delete"
-                                  : "Are you sure?"}
-                              </AlertDialogTitle>
-                              <AlertDialogDescription>
-                                {deleteError ||
-                                  "This action cannot be undone."}
-                              </AlertDialogDescription>
-                            </AlertDialogHeader>
-
-                            <AlertDialogFooter>
-                              <AlertDialogCancel
-                                onClick={() => setDeleteError("")}
+                        <TableCell>
+                          {editingId === product.id ? (
+                            <div className="flex items-center gap-2">
+                              <Input
+                                type="number"
+                                value={newQty}
+                                onChange={(e) => setNewQty(Number(e.target.value))}
+                                className="w-24"
+                              />
+                              <Button size="sm" onClick={() => updateQuantity(product.id)}>
+                                Save
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => setEditingId(null)}>
+                                Cancel
+                              </Button>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <span>{product.qty}</span>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  setEditingId(product.id);
+                                  setNewQty(product.qty);
+                                }}
                               >
-                                {deleteError ? "OK" : "Cancel"}
-                              </AlertDialogCancel>
+                                Edit
+                              </Button>
 
-                              {!deleteError && (
-                                <AlertDialogAction
-                                  onClick={() => handleDelete(product)}
-                                >
-                                  Delete
-                                </AlertDialogAction>
+                              {product.qty <= product.low_stock_threshold && (
+                                <Badge variant="destructive" className="gap-1">
+                                  <AlertTriangle className="w-3 h-3" />
+                                  Low Stock
+                                </Badge>
                               )}
-                            </AlertDialogFooter>
-                          </AlertDialogContent>
-                        </AlertDialog>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
+                            </div>
+                          )}
+                        </TableCell>
+
+                        <TableCell className="font-bold">₹{Number(product.price).toFixed(2)}</TableCell>
+
+                        <TableCell className="text-right">
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <Button size="sm" variant="destructive" onClick={() => setDeleteError("")}>
+                                <Trash2 className="w-4 h-4 mr-2" />
+                                Delete
+                              </Button>
+                            </AlertDialogTrigger>
+
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>{deleteError ? "Cannot Delete" : "Are you sure?"}</AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  {deleteError || "This action archives the product (keeps history)."}
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+
+                              <AlertDialogFooter>
+                                <AlertDialogCancel onClick={() => setDeleteError("")}>{deleteError ? "OK" : "Cancel"}</AlertDialogCancel>
+
+                                {!deleteError && (
+                                  <AlertDialogAction onClick={() => handleDelete(product)}>
+                                    Delete
+                                  </AlertDialogAction>
+                                )}
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
+                )}
               </TableBody>
             </Table>
           </div>
