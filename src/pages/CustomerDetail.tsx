@@ -138,39 +138,53 @@ const CustomerDetail = () => {
           <h2 className="text-2xl font-bold mb-4">Purchase History</h2>
           <div className="rounded-lg border overflow-hidden">
             <Table>
-              <TableHeader>
-                <TableRow className="bg-gradient-primary hover:bg-gradient-primary">
-                  <TableHead className="text-white">Date</TableHead>
-                  <TableHead className="text-white">Products</TableHead>
-                  <TableHead className="text-white">Total</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {sales.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={3} className="text-center text-muted-foreground py-8">
-                      No purchases yet
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  sales.map((sale) => (
-                    <TableRow key={sale.id}>
-                      <TableCell>
-                        {new Date(sale.created_at).toLocaleDateString()} {new Date(sale.created_at).toLocaleTimeString()}
-                      </TableCell>
-                      <TableCell>
-                        {sale.sale_items.map((item, i) => (
-                          <div key={i}>
-                            {(item.products && item.products.name) ? item.products.name : "(product removed)"} x{item.qty}
-                          </div>
-                        ))}
-                      </TableCell>
-                      <TableCell className="font-bold">₹{Number(sale.total).toFixed(2)}</TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
+  <TableHeader>
+    <TableRow className="bg-gradient-primary hover:bg-gradient-primary">
+      <TableHead className="text-white">Date</TableHead>
+      <TableHead className="text-white">Products</TableHead>
+      <TableHead className="text-white">Extra Details</TableHead>
+      <TableHead className="text-white">Total</TableHead>
+    </TableRow>
+  </TableHeader>
+
+  <TableBody>
+    {sales.length === 0 ? (
+      <TableRow>
+        <TableCell colSpan={4} className="text-center text-muted-foreground py-8">
+          No purchases yet
+        </TableCell>
+      </TableRow>
+    ) : (
+      sales.map((sale) => (
+        <TableRow key={sale.id}>
+          <TableCell>
+            {new Date(sale.created_at).toLocaleDateString()}{" "}
+            {new Date(sale.created_at).toLocaleTimeString()}
+          </TableCell>
+
+          <TableCell>
+            {sale.sale_items.map((item, i) => (
+              <div key={i}>
+                {item.products?.name || "(product removed)"} x{item.qty}
+              </div>
+            ))}
+          </TableCell>
+
+          <TableCell>
+            {sale.extra_details && sale.extra_details.trim() !== ""
+              ? sale.extra_details
+              : "No details"}
+          </TableCell>
+
+          <TableCell className="font-bold">
+            ₹{Number(sale.total).toFixed(2)}
+          </TableCell>
+        </TableRow>
+      ))
+    )}
+  </TableBody>
+</Table>
+
           </div>
         </Card>
       </div>
