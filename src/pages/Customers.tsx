@@ -5,8 +5,25 @@ import Layout from "@/components/Layout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
 import { Search, Eye, Trash2 } from "lucide-react";
 
@@ -23,15 +40,23 @@ const Customers = () => {
   const [search, setSearch] = useState("");
   const [filteredCustomers, setFilteredCustomers] = useState<Customer[]>([]);
 
+  // ⭐ Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const customersPerPage = 50;
+
   useEffect(() => {
     fetchCustomers();
   }, []);
 
   useEffect(() => {
-    if (search) {
-      setFilteredCustomers(
-        customers.filter((c) => c.phone.includes(search) || c.name.toLowerCase().includes(search.toLowerCase()))
+    if (search.trim() !== "") {
+      const filtered = customers.filter(
+        (c) =>
+          c.phone.includes(search) ||
+          c.name.toLowerCase().includes(search.toLowerCase())
       );
+      setFilteredCustomers(filtered);
+      setCurrentPage(1); // Reset page when searching
     } else {
       setFilteredCustomers(customers);
     }
@@ -39,8 +64,13 @@ const Customers = () => {
 
   const fetchCustomers = async () => {
     try {
-      const { data, error } = await supabase.from("customers").select("*").order("created_at", { ascending: false });
+      const { data, error } = await supabase
+        .from("customers")
+        .select("*")
+        .order("created_at", { ascending: false });
+
       if (error) throw error;
+
       setCustomers(data || []);
       setFilteredCustomers(data || []);
     } catch (error: any) {
@@ -52,7 +82,9 @@ const Customers = () => {
   const handleDelete = async (id: string) => {
     try {
       const { error } = await supabase.from("customers").delete().eq("id", id);
+
       if (error) throw error;
+
       toast.success("Customer deleted successfully");
       fetchCustomers();
     } catch (error: any) {
@@ -60,6 +92,13 @@ const Customers = () => {
       toast.error(error.message || "Failed to delete customer");
     }
   };
+
+  // ⭐ PAGINATION LOGIC
+  const indexOfLast = currentPage * customersPerPage;
+  const indexOfFirst = indexOfLast - customersPerPage;
+  const currentCustomers = filteredCustomers.slice(indexOfFirst, indexOfLast);
+
+  const totalPages = Math.ceil(filteredCustomers.length / customersPerPage);
 
   return (
     <Layout>
@@ -71,9 +110,12 @@ const Customers = () => {
             </h1>
             <p className="text-muted-foreground">Manage your customers</p>
           </div>
-          <div className="flex items-center gap-2">
-            <Button onClick={() => navigate('/add-customer')} className="bg-gradient-primary">Add Customer</Button>
-          </div>
+          <Button
+            onClick={() => navigate("/add-customer")}
+            className="bg-gradient-primary"
+          >
+            Add Customer
+          </Button>
         </div>
 
         <Card className="p-6 backdrop-blur-xl bg-white/50 border-white/20 shadow-glass">
@@ -98,17 +140,23 @@ const Customers = () => {
                   <TableHead className="text-white text-right">Actions</TableHead>
                 </TableRow>
               </TableHeader>
+
               <TableBody>
-                {filteredCustomers.length === 0 ? (
+                {currentCustomers.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={3} className="text-center text-muted-foreground py-8">
+                    <TableCell
+                      colSpan={3}
+                      className="text-center text-muted-foreground py-8"
+                    >
                       No customers found
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filteredCustomers.map((customer) => (
+                  currentCustomers.map((customer) => (
                     <TableRow key={customer.id}>
-                      <TableCell className="font-medium">{customer.name}</TableCell>
+                      <TableCell className="font-medium">
+                        {customer.name}
+                      </TableCell>
                       <TableCell>{customer.phone}</TableCell>
                       <TableCell className="text-right space-x-2">
                         <Button
@@ -119,6 +167,7 @@ const Customers = () => {
                           <Eye className="w-4 h-4 mr-2" />
                           View Details
                         </Button>
+
                         <AlertDialog>
                           <AlertDialogTrigger asChild>
                             <Button size="sm" variant="destructive">
@@ -130,12 +179,15 @@ const Customers = () => {
                             <AlertDialogHeader>
                               <AlertDialogTitle>Are you sure?</AlertDialogTitle>
                               <AlertDialogDescription>
-                                This will delete the customer but keep their sales history intact.
+                                This will delete the customer but keep their
+                                sales history intact.
                               </AlertDialogDescription>
                             </AlertDialogHeader>
                             <AlertDialogFooter>
                               <AlertDialogCancel>Cancel</AlertDialogCancel>
-                              <AlertDialogAction onClick={() => handleDelete(customer.id)}>
+                              <AlertDialogAction
+                                onClick={() => handleDelete(customer.id)}
+                              >
                                 Delete
                               </AlertDialogAction>
                             </AlertDialogFooter>
@@ -148,6 +200,37 @@ const Customers = () => {
               </TableBody>
             </Table>
           </div>
+
+          {/* ⭐ PAGINATION BUTTONS */}
+          {totalPages > 1 && (
+            <div className="flex justify-center mt-6 gap-2">
+              <Button
+                variant="outline"
+                disabled={currentPage === 1}
+                onClick={() => setCurrentPage((p) => p - 1)}
+              >
+                Previous
+              </Button>
+
+              {[...Array(totalPages)].map((_, index) => (
+                <Button
+                  key={index}
+                  variant={currentPage === index + 1 ? "default" : "outline"}
+                  onClick={() => setCurrentPage(index + 1)}
+                >
+                  {index + 1}
+                </Button>
+              ))}
+
+              <Button
+                variant="outline"
+                disabled={currentPage === totalPages}
+                onClick={() => setCurrentPage((p) => p + 1)}
+              >
+                Next
+              </Button>
+            </div>
+          )}
         </Card>
       </div>
     </Layout>
