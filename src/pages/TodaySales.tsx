@@ -13,9 +13,7 @@ interface Sale {
   created_at: string;
   sale_items: {
     qty: number;
-    products: {
-      name: string;
-    };
+    products: { name: string };
   }[];
 }
 
@@ -31,6 +29,7 @@ const TodaySales = () => {
     try {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
+      const startOfDay = today.toISOString().split("T")[0] + "T00:00:00.000Z";
 
       const { data, error } = await supabase
         .from("sales")
@@ -41,17 +40,17 @@ const TodaySales = () => {
             products (name)
           )
         `)
-        .gte("created_at", `${new Date().toISOString().split("T")[0]}T00:00:00`)
-
+        .gte("created_at", startOfDay)
         .order("created_at", { ascending: false });
 
       if (error) throw error;
 
       setSales(data || []);
-      const total = data?.reduce((sum, sale) => sum + Number(sale.total), 0) || 0;
+      const total =
+        data?.reduce((sum: number, s) => sum + Number(s.total), 0) || 0;
+
       setTotalRevenue(total);
-    } catch (error: any) {
-      console.error("Fetch today sales error:", error);
+    } catch (e: any) {
       toast.error("Failed to load today's sales");
     }
   };
@@ -66,7 +65,8 @@ const TodaySales = () => {
             </h1>
             <p className="text-muted-foreground">View all sales made today</p>
           </div>
-          <Card className="p-4 bg-gradient-accent border-0 shadow-glow">
+
+          <Card className="p-4 bg-gradient-accent">
             <div className="text-white">
               <p className="text-sm opacity-80">Total Revenue</p>
               <p className="text-3xl font-bold">₹{totalRevenue.toFixed(2)}</p>
@@ -74,11 +74,11 @@ const TodaySales = () => {
           </Card>
         </div>
 
-        <Card className="p-6 backdrop-blur-xl bg-white/50 border-white/20 shadow-glass">
+        <Card className="p-6 bg-white/70 backdrop-blur-xl shadow-glass">
           <div className="rounded-lg border overflow-hidden">
             <Table>
               <TableHeader>
-                <TableRow className="bg-gradient-accent hover:bg-gradient-accent">
+                <TableRow className="bg-gradient-accent">
                   <TableHead className="text-white">Time</TableHead>
                   <TableHead className="text-white">Name</TableHead>
                   <TableHead className="text-white">Phone</TableHead>
@@ -86,6 +86,7 @@ const TodaySales = () => {
                   <TableHead className="text-white">Total</TableHead>
                 </TableRow>
               </TableHeader>
+
               <TableBody>
                 {sales.length === 0 ? (
                   <TableRow>
@@ -99,16 +100,16 @@ const TodaySales = () => {
                       <TableCell>
                         {new Date(sale.created_at).toLocaleTimeString()}
                       </TableCell>
-                      <TableCell className="font-medium">{sale.customer_name}</TableCell>
+                      <TableCell>{sale.customer_name}</TableCell>
                       <TableCell>{sale.customer_phone}</TableCell>
                       <TableCell>
-                        {sale.sale_items.map((item, i) => (
+                        {sale.sale_items?.map((item, i) => (
                           <div key={i}>
                             {item.products.name} x{item.qty}
                           </div>
                         ))}
                       </TableCell>
-                      <TableCell className="font-bold">₹{Number(sale.total).toFixed(2)}</TableCell>
+                      <TableCell className="font-bold">₹{sale.total.toFixed(2)}</TableCell>
                     </TableRow>
                   ))
                 )}
